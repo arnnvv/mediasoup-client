@@ -1,32 +1,27 @@
-/**
- * Worker
- * |-> Router(s)
- *     |-> Producer Transport(s)
- *         |-> Producer
- *     |-> Consumer Transport(s)
- *         |-> Consumer
- **/
 import { io } from "socket.io-client";
 import {
   type Transport,
   type RtpCapabilities,
   Device,
+  type Producer,
+  type Consumer,
 } from "mediasoup-client/types";
+
 let rtpCapabilities: RtpCapabilities;
 let device: Device;
+let producer: Producer;
 let producerTransport: Transport;
-/*
-let sendTransport: Transport;
-let recvTransport: Transport;
-*/
+let consumer: Consumer;
+let consumerTransport: Transport;
 
 const socket = io("wss://localhost:3000/mediasoup");
+
 socket.on("connection-success", ({ socketId }) => {
   console.log(socketId);
 });
 
 const localVideo = document.getElementById("localVideo") as HTMLVideoElement;
-//const remoteVideo = document.getElementById("remoteVideo") as HTMLVideoElement;
+const remoteVideo = document.getElementById("remoteVideo") as HTMLVideoElement;
 const btnLocalVideo = document.getElementById(
   "btnLocalVideo",
 ) as HTMLButtonElement;
@@ -37,17 +32,16 @@ const btnDevice = document.getElementById("btnDevice") as HTMLButtonElement;
 const btnCreateSendTransport = document.getElementById(
   "btnCreateSendTransport",
 ) as HTMLButtonElement;
-/*
 const btnConnectSendTransport = document.getElementById(
   "btnConnectSendTransport",
 ) as HTMLButtonElement;
 const btnCreateRecvTransport = document.getElementById(
-  "btnCreateRecvTransport",
+  "btnRecvSendTransport",
 ) as HTMLButtonElement;
 const btnConnectRecvTransport = document.getElementById(
   "btnConnectRecvTransport",
 ) as HTMLButtonElement;
-*/
+
 let params: any = {
   encodings: [
     {
@@ -70,6 +64,15 @@ let params: any = {
     videoGoogleStartBitrate: 1000,
   },
 };
+
+/**
+ * Worker
+ * |-> Router(s)
+ *     |-> Producer Transport(s)
+ *         |-> Producer
+ *     |-> Consumer Transport(s)
+ *         |-> Consumer
+ **/
 
 function streamSuccess(stream: MediaStream) {
   localVideo.srcObject = stream;
@@ -143,7 +146,7 @@ async function createSendTransport() {
       },
     );
 
-    producerTransport.on("produce", async (parameters, callback, errback) => {
+    producerTransport.on("produce", (parameters, callback, errback) => {
       console.log(parameters);
 
       try {
@@ -165,7 +168,83 @@ async function createSendTransport() {
   });
 }
 
+async function connectSendTransport() {
+  producer = await producerTransport.produce(params);
+
+  producer.on("trackended", () => {
+    console.log("track ended");
+  });
+
+  producer.on("transportclose", () => {
+    console.log("transport ended");
+  });
+}
+
+async function createRecvTransport() {
+  console.log("maa ki chut");
+  socket.emit("createWebRtcTransport", { sender: false }, ({ params }: any) => {
+    if (params.error) {
+      console.log(params.error);
+      return;
+    }
+
+    console.log(params);
+
+    // creates a new WebRTC Transport to receive media
+    // https://mediasoup.org/documentation/v3/mediasoup-client/api/#device-createRecvTransport
+    consumerTransport = device.createRecvTransport(params);
+
+    // https://mediasoup.org/documentation/v3/communication-between-client-and-server/#producing-media
+    consumerTransport.on(
+      "connect",
+      async ({ dtlsParameters }, callback, errback) => {
+        try {
+          socket.emit("transport-recv-connect", {
+            dtlsParameters,
+          });
+
+          callback();
+        } catch (error: any) {
+          errback(error);
+        }
+      },
+    );
+  });
+}
+
+async function connectRecvTransport() {
+  socket.emit(
+    "consume",
+    {
+      rtpCapabilities: device.rtpCapabilities,
+    },
+    async ({ params }: any) => {
+      if (params.error) {
+        console.log("Cannot Consume");
+        return;
+      }
+
+      console.log(params);
+      consumer = await consumerTransport.consume({
+        id: params.id,
+        producerId: params.producerId,
+        kind: params.kind,
+        rtpParameters: params.rtpParameters,
+      });
+
+      const { track } = consumer;
+
+      remoteVideo.srcObject = new MediaStream([track]);
+
+      socket.emit("consumer-resume");
+    },
+  );
+}
+
 btnLocalVideo.addEventListener("click", getLocalStream);
 btnRtpCapabilities.addEventListener("click", getRtpCapabilities);
 btnDevice.addEventListener("click", createDevice);
 btnCreateSendTransport.addEventListener("click", createSendTransport);
+btnConnectSendTransport.addEventListener("mousedown", connectSendTransport);
+btnCreateRecvTransport.addEventListener("click", createRecvTransport);
+btnConnectRecvTransport.addEventListener("click", connectRecvTransport);
