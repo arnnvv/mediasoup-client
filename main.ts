@@ -7,10 +7,14 @@
  *         |-> Consumer
  **/
 import { io } from "socket.io-client";
-import { Device, Transport, type RtpCapabilities } from "mediasoup-client/types";
+import {
+  type Transport,
+  type RtpCapabilities,
+  Device,
+} from "mediasoup-client/types";
 let rtpCapabilities: RtpCapabilities;
 let device: Device;
-let producerTransport: Transport
+let producerTransport: Transport;
 /*
 let sendTransport: Transport;
 let recvTransport: Transport;
@@ -116,46 +120,52 @@ function getRtpCapabilities() {
 }
 
 async function createSendTransport() {
-  socket.emit('createWebRtcTransport', { sender: true }, ({ params }: any) => {
+  socket.emit("createWebRtcTransport", { sender: true }, ({ params }: any) => {
     if (params.error) {
-      console.log(params.error)
-      return
+      console.log(params.error);
+      return;
     }
 
-    console.log(params)
-    producerTransport = device.createSendTransport(params)
-    producerTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
+    console.log(params);
+    producerTransport = device.createSendTransport(params);
+    producerTransport.on(
+      "connect",
+      async ({ dtlsParameters }, callback, errback) => {
+        try {
+          socket.emit("transport-connect", {
+            dtlsParameters,
+          });
+
+          callback();
+        } catch (error: any) {
+          errback(error);
+        }
+      },
+    );
+
+    producerTransport.on("produce", async (parameters, callback, errback) => {
+      console.log(parameters);
+
       try {
-        socket.emit('transport-connect', {
-          dtlsParameters,
-        })
-
-        callback()
-
+        socket.emit(
+          "transport-produce",
+          {
+            kind: parameters.kind,
+            rtpParameters: parameters.rtpParameters,
+            appData: parameters.appData,
+          },
+          ({ id }: any) => {
+            callback({ id });
+          },
+        );
       } catch (error: any) {
-        errback(error)
+        errback(error);
       }
-    })
-
-    producerTransport.on('produce', async (parameters, callback, errback) => {
-      console.log(parameters)
-
-      try {
-        socket.emit('transport-produce', {
-          kind: parameters.kind,
-          rtpParameters: parameters.rtpParameters,
-          appData: parameters.appData,
-        }, ({ id }: any) => {
-          callback({ id })
-        })
-      } catch (error: any) {
-        errback(error)
-      }
-    })
-  })
+    });
+  });
 }
 
 btnLocalVideo.addEventListener("click", getLocalStream);
 btnRtpCapabilities.addEventListener("click", getRtpCapabilities);
 btnDevice.addEventListener("click", createDevice);
-btnCreateSendTransport.addEventListener('click', createSendTransport)
+btnCreateSendTransport.addEventListener("click", createSendTransport);
