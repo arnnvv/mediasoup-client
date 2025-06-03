@@ -40,7 +40,7 @@ const videoParams = {
 
 async function initSocket() {
   socket = io("wss://localhost:3000/mediasoup", {
-    secure: true,
+    secure: false,
     rejectUnauthorized: false,
   });
 
