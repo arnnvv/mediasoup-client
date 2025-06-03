@@ -1,26 +1,33 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mediasoup 2-Person Call</title>
-  </head>
-  <body>
-    <div id="videos">
-      <div class="video-container">
-        <h3>Local Video</h3>
-        <video id="localVideo" autoplay muted playsinline></video>
-      </div>
-      <div class="video-container">
-        <h3>Remote Video</h3>
-        <video id="remoteVideo" autoplay playsinline></video>
-      </div>
-    </div>
+</head>
+<body>
+    <div class="container">
+        <h1>MediaSoup Audio/Video Chat</h1>
 
-    <div id="controls">
-      <button id="btnStartStreaming">Start Streaming</button>
+        <div class="video-container">
+            <div class="video-wrapper">
+                <h3>Local Video</h3>
+                <video id="localVideo" autoplay muted playsinline></video>
+            </div>
+
+            <div class="video-wrapper">
+                <h3>Remote Video</h3>
+                <video id="remoteVideo" autoplay playsinline></video>
+                <audio id="remoteAudio" autoplay playsinline controls></audio>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="btnStartStreaming">Start Streaming</button>
+        </div>
     </div>
 
     <script type="module" src="/main.ts"></script>
-  </body>
+</body>
 </html>
+
