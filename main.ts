@@ -108,6 +108,34 @@ async function initSocket() {
   });
 
   socket.on(
+    "existing-producers",
+    async (data: {
+      producers: Array<{
+        producerId: string;
+        producerSocketId: string;
+        kind: "audio" | "video";
+      }>;
+    }) => {
+      console.log("Received existing producers:", data.producers);
+      for (const producerInfo of data.producers) {
+        if (producerInfo.producerSocketId === socket.id) {
+          console.log("Ignoring self as existing producer.");
+          continue;
+        }
+        if (
+          producerInfo.kind === "video" &&
+          !consumers.has(producerInfo.producerId)
+        ) {
+          console.log(
+            `Found existing video producer to consume: ${producerInfo.producerId}`,
+          );
+          await consumeStream(producerInfo.producerId);
+        }
+      }
+    },
+  );
+
+  socket.on(
     "consumer-closed",
     ({
       consumerId,
