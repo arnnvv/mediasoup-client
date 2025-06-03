@@ -3,64 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + TS</title>
+    <title>Mediasoup 2-Person Call</title>
   </head>
   <body>
-    <body>
-        <div id="video">
-            <table>
-                <thead>
-                    <th>Local Video</th>
-                    <th>Remote Video</th>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>
-                            <div id="sharedBtns">
-                                <video id="localVideo" autoplay class="video" ></video>
-                            </div>
-                        </td>
-                        <td>
-                            <div id="sharedBtns">
-                                <video id="remoteVideo" autoplay class="video" ></video>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <div id="sharedBtns">
-                                <button id="btnLocalVideo">1. Get Local Video</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td colspan="2">
-                            <div id="sharedBtns">
-                                <button id="btnRtpCapabilities">2. Get Rtp Capabilities</button>
-                                <br />
-                                <button id="btnDevice">3. Create Device</button>
-                            </div>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <div id="sharedBtns">
-                                <button id="btnCreateSendTransport">4. Create Send Transport</button>
-                                <br />
-                                <button id="btnConnectSendTransport">5. Connect Send Transport & Produce</button></td>
-                            </div>
-                        <td>
-                            <div id="sharedBtns">
-                                <button id="btnRecvSendTransport">6. Create Recv Transport</button>
-                                <br />
-                                <button id="btnConnectRecvTransport">7. Connect Recv Transport & Consume</button>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </body>
+    <div id="videos">
+      <div class="video-container">
+        <h3>Local Video</h3>
+        <video id="localVideo" autoplay muted playsinline></video>
+      </div>
+      <div class="video-container">
+        <h3>Remote Video</h3>
+        <video id="remoteVideo" autoplay playsinline></video>
+      </div>
+    </div>
+
+    <div id="controls">
+      <button id="btnStartStreaming">Start Streaming</button>
+    </div>
+
     <script type="module" src="/main.ts"></script>
   </body>
 </html>
