@@ -7,7 +7,19 @@ import {
   type Consumer,
   type DtlsParameters,
   type RtpParameters,
+  type TransportOptions,
 } from "mediasoup-client/types";
+import type {
+  RtpCapabilitiesResponse,
+  CreateTransportResponse,
+  ProduceResponse,
+  ConsumeResponse,
+  NewProducerData,
+  ExistingProducersData,
+  ProducerClosedData,
+  ConsumerClosedData,
+  ConnectionSuccessData,
+} from "./types";
 
 let socket: Socket;
 let device: Device;
@@ -18,6 +30,7 @@ let audioProducer: Producer | null = null;
 let consumerTransport: Transport | null = null;
 const consumers = new Map<string, Consumer>();
 let localStream: MediaStream | null = null;
+let isConsumingInProgress = false;
 
 const localVideo = document.getElementById("localVideo") as HTMLVideoElement;
 const remoteVideo = document.getElementById("remoteVideo") as HTMLVideoElement;
@@ -37,14 +50,17 @@ const videoParams = {
   },
 };
 
+let remoteVideoStream: MediaStream | null = null;
+let remoteAudioStream: MediaStream | null = null;
+
 async function initSocket() {
   socket = io("wss://localhost:3000/mediasoup", {
     secure: false,
     rejectUnauthorized: false,
   });
 
-  socket.on("connection-success", ({ socketId }) => {
-    console.log("Connected to Mediasoup server with socket ID:", socketId);
+  socket.on("connection-success", (data: ConnectionSuccessData) => {
+    console.log("Connected to Mediasoup server with socket ID:", data.socketId);
   });
 
   socket.on("connect_error", (error) => {
@@ -57,140 +73,128 @@ async function initSocket() {
 
   socket.on("disconnect", () => {
     console.warn("Disconnected from Mediasoup server");
-    if (videoProducer) videoProducer.close();
-    if (audioProducer) audioProducer.close();
-    if (producerTransport) producerTransport.close();
-    consumers.forEach((c) => c.close());
-    if (consumerTransport) consumerTransport.close();
-
-    videoProducer = null;
-    audioProducer = null;
-    producerTransport = null;
-    consumers.clear();
-    consumerTransport = null;
-    remoteVideo.srcObject = null;
-    remoteAudio.srcObject = null;
-    btnStartStreaming.textContent = "Start Streaming";
-    btnStartStreaming.disabled = false;
+    cleanup();
   });
 
-  socket.on(
-    "new-producer",
-    async (data: {
-      producerId: string;
-      producerSocketId: string;
-      kind: "audio" | "video";
-    }) => {
-      console.log("New producer available:", data);
-      if (data.producerSocketId === socket.id) {
-        console.log("Ignoring self-produced stream.");
-        return;
-      }
+  socket.on("new-producer", async (data: NewProducerData) => {
+    console.log("New producer available:", data);
+    if (data.producerSocketId === socket.id) {
+      console.log("Ignoring self-produced stream.");
+      return;
+    }
 
-      if (!consumers.has(data.producerId)) {
-        await consumeStream(data.producerId);
-      }
-    },
-  );
+    if (!consumers.has(data.producerId)) {
+      console.log(
+        `Attempting to consume new ${data.kind} producer: ${data.producerId}`,
+      );
+      await consumeStream(data.producerId);
+    } else {
+      console.log(`Already consuming producer ${data.producerId}`);
+    }
+  });
 
-  socket.on("producer-closed", ({ producerId }: { producerId: string }) => {
-    console.log(`Producer ${producerId} closed on server.`);
-    const consumer = consumers.get(producerId);
+  socket.on("producer-closed", (data: ProducerClosedData) => {
+    console.log(`Producer ${data.producerId} closed on server.`);
+    const consumer = consumers.get(data.producerId);
     if (consumer) {
-      consumer.close();
-      consumers.delete(producerId);
+      handleConsumerClosed(consumer);
+      consumers.delete(data.producerId);
+    }
+  });
 
-      // Handle video stream cleanup
-      if (
-        consumer.kind === "video" &&
-        remoteVideo.srcObject &&
-        (remoteVideo.srcObject as MediaStream)
-          .getTracks()
-          .some((t) => t.id === consumer.track.id)
-      ) {
-        remoteVideo.srcObject = null;
-        console.log("Remote video cleared because producer closed.");
+  socket.on("existing-producers", async (data: ExistingProducersData) => {
+    console.log("Received existing producers:", data.producers);
+
+    for (const producerInfo of data.producers) {
+      if (producerInfo.producerSocketId === socket.id) {
+        console.log("Ignoring self as existing producer.");
+        continue;
       }
 
-      // Handle audio stream cleanup
-      if (
-        consumer.kind === "audio" &&
-        remoteAudio.srcObject &&
-        (remoteAudio.srcObject as MediaStream)
-          .getTracks()
-          .some((t) => t.id === consumer.track.id)
-      ) {
-        remoteAudio.srcObject = null;
-        console.log("Remote audio cleared because producer closed.");
+      if (!consumers.has(producerInfo.producerId)) {
+        console.log(
+          `Found existing ${producerInfo.kind} producer to consume: ${producerInfo.producerId}`,
+        );
+        try {
+          await consumeStream(producerInfo.producerId);
+        } catch (error) {
+          console.error(
+            `Failed to consume existing producer ${producerInfo.producerId}:`,
+            error,
+          );
+        }
+      } else {
+        console.log(
+          `Already consuming existing producer ${producerInfo.producerId}`,
+        );
       }
     }
   });
 
-  socket.on(
-    "existing-producers",
-    async (data: {
-      producers: Array<{
-        producerId: string;
-        producerSocketId: string;
-        kind: "audio" | "video";
-      }>;
-    }) => {
-      console.log("Received existing producers:", data.producers);
-      for (const producerInfo of data.producers) {
-        if (producerInfo.producerSocketId === socket.id) {
-          console.log("Ignoring self as existing producer.");
-          continue;
-        }
+  socket.on("consumer-closed", (data: ConsumerClosedData) => {
+    console.log(
+      `Consumer ${data.consumerId} (for producer ${data.producerId}) closed by server.`,
+    );
+    const consumer = consumers.get(data.producerId);
+    if (consumer && consumer.id === data.consumerId) {
+      handleConsumerClosed(consumer);
+      consumers.delete(data.producerId);
+    }
+  });
+}
 
-        if (!consumers.has(producerInfo.producerId)) {
-          console.log(
-            `Found existing ${producerInfo.kind} producer to consume: ${producerInfo.producerId}`,
-          );
-          await consumeStream(producerInfo.producerId);
-        }
-      }
-    },
+function handleConsumerClosed(consumer: Consumer) {
+  console.log(
+    `Handling closed consumer: ${consumer.id}, kind: ${consumer.kind}`,
   );
 
-  socket.on(
-    "consumer-closed",
-    ({
-      consumerId,
-      producerId,
-    }: { consumerId: string; producerId: string }) => {
-      console.log(
-        `Consumer ${consumerId} (for producer ${producerId}) closed by server.`,
-      );
-      const consumer = consumers.get(producerId);
-      if (consumer && consumer.id === consumerId) {
-        consumers.delete(producerId);
-
-        // Handle video stream cleanup
-        if (
-          consumer.kind === "video" &&
-          remoteVideo.srcObject &&
-          (remoteVideo.srcObject as MediaStream)
-            .getTracks()
-            .some((t) => t.id === consumer.track.id)
-        ) {
-          remoteVideo.srcObject = null;
-          console.log("Remote video cleared because consumer closed.");
-        }
-
-        // Handle audio stream cleanup
-        if (
-          consumer.kind === "audio" &&
-          remoteAudio.srcObject &&
-          (remoteAudio.srcObject as MediaStream)
-            .getTracks()
-            .some((t) => t.id === consumer.track.id)
-        ) {
-          remoteAudio.srcObject = null;
-          console.log("Remote audio cleared because consumer closed.");
-        }
+  if (consumer.kind === "video") {
+    if (
+      remoteVideoStream &&
+      remoteVideoStream.getTracks().some((t) => t.id === consumer.track.id)
+    ) {
+      remoteVideoStream.removeTrack(consumer.track);
+      if (remoteVideoStream.getTracks().length === 0) {
+        remoteVideo.srcObject = null;
+        remoteVideoStream = null;
+        console.log("Remote video stream cleared");
       }
-    },
-  );
+    }
+  } else if (consumer.kind === "audio") {
+    if (
+      remoteAudioStream &&
+      remoteAudioStream.getTracks().some((t) => t.id === consumer.track.id)
+    ) {
+      remoteAudioStream.removeTrack(consumer.track);
+      if (remoteAudioStream.getTracks().length === 0) {
+        remoteAudio.srcObject = null;
+        remoteAudioStream = null;
+        console.log("Remote audio stream cleared");
+      }
+    }
+  }
+
+  consumer.close();
+}
+
+function cleanup() {
+  if (videoProducer) videoProducer.close();
+  if (audioProducer) audioProducer.close();
+  if (producerTransport) producerTransport.close();
+  consumers.forEach((c) => c.close());
+  if (consumerTransport) consumerTransport.close();
+
+  videoProducer = null;
+  audioProducer = null;
+  producerTransport = null;
+  consumers.clear();
+  consumerTransport = null;
+  remoteVideo.srcObject = null;
+  remoteAudio.srcObject = null;
+  remoteVideoStream = null;
+  remoteAudioStream = null;
+  btnStartStreaming.textContent = "Start Streaming";
+  btnStartStreaming.disabled = false;
 }
 
 async function getLocalVideo(): Promise<MediaStream | null> {
@@ -223,10 +227,9 @@ async function loadDevice() {
   }
 
   try {
-    rtpCapabilities = await new Promise((resolve, reject) => {
-      socket.emit(
-        "getRtpCapabilities",
-        (data: { rtpCapabilities: ClientRtpCapabilities }) => {
+    rtpCapabilities = await new Promise<ClientRtpCapabilities>(
+      (resolve, reject) => {
+        socket.emit("getRtpCapabilities", (data: RtpCapabilitiesResponse) => {
           if (!data || !data.rtpCapabilities) {
             reject(new Error("Failed to get RTP capabilities from server."));
             return;
@@ -234,9 +237,9 @@ async function loadDevice() {
 
           console.log("Router RTP Capabilities:", data.rtpCapabilities);
           resolve(data.rtpCapabilities);
-        },
-      );
-    });
+        });
+      },
+    );
 
     device = new Device();
     await device.load({ routerRtpCapabilities: rtpCapabilities });
@@ -253,21 +256,28 @@ async function loadDevice() {
 
 async function createSendTransport() {
   console.log("Creating send transport...");
-  const transportParams: any = await new Promise((resolve, reject) => {
-    socket.emit(
-      "createWebRtcTransport",
-      { sender: true },
-      (response: { params?: any; error?: string }) => {
-        if (response.error) {
-          reject(new Error(response.error));
-          return;
-        }
+  const transportParams = await new Promise<TransportOptions>(
+    (resolve, reject) => {
+      socket.emit(
+        "createWebRtcTransport",
+        { sender: true },
+        (response: CreateTransportResponse) => {
+          if (response.error) {
+            reject(new Error(response.error));
+            return;
+          }
 
-        console.log("Send transport params from server:", response.params);
-        resolve(response.params);
-      },
-    );
-  });
+          if (!response.params) {
+            reject(new Error("No transport params received"));
+            return;
+          }
+
+          console.log("Send transport params from server:", response.params);
+          resolve(response.params);
+        },
+      );
+    },
+  );
 
   producerTransport = device.createSendTransport(transportParams);
 
@@ -312,20 +322,20 @@ async function createSendTransport() {
             rtpParameters,
             appData,
           },
-          ({ id, error }: { id?: string; error?: string }) => {
-            if (error) {
-              errback(new Error(error));
+          (response: ProduceResponse) => {
+            if (response.error) {
+              errback(new Error(response.error));
               return;
             }
 
-            if (!id) {
+            if (!response.id) {
               errback(new Error("Server did not return a producer id"));
               return;
             }
 
-            callback({ id });
+            callback({ id: response.id });
             console.log(
-              `Successfully produced ${kind} with server-side id: ${id}`,
+              `Successfully produced ${kind} with server-side id: ${response.id}`,
             );
           },
         );
@@ -419,21 +429,28 @@ async function startProducingAudio() {
 
 async function createRecvTransport() {
   console.log("Creating receive transport...");
-  const transportParams: any = await new Promise((resolve, reject) => {
-    socket.emit(
-      "createWebRtcTransport",
-      { sender: false },
-      (response: { params?: any; error?: string }) => {
-        if (response.error) {
-          reject(new Error(response.error));
-          return;
-        }
+  const transportParams = await new Promise<TransportOptions>(
+    (resolve, reject) => {
+      socket.emit(
+        "createWebRtcTransport",
+        { sender: false },
+        (response: CreateTransportResponse) => {
+          if (response.error) {
+            reject(new Error(response.error));
+            return;
+          }
 
-        console.log("Receive transport params from server:", response.params);
-        resolve(response.params);
-      },
-    );
-  });
+          if (!response.params) {
+            reject(new Error("No transport params received"));
+            return;
+          }
+
+          console.log("Receive transport params from server:", response.params);
+          resolve(response.params);
+        },
+      );
+    },
+  );
 
   consumerTransport = device.createRecvTransport(transportParams);
 
@@ -478,33 +495,48 @@ async function consumeStream(producerIdToConsume: string) {
     return;
   }
 
-  console.log(`Requesting to consume producer: ${producerIdToConsume}`);
-  const consumerParams: any = await new Promise((resolve, reject) => {
-    socket.emit(
-      "consume",
-      {
-        consumerTransportId: consumerTransport!.id,
-        producerId: producerIdToConsume,
-        rtpCapabilities: device.rtpCapabilities,
-      },
-      (response: { params?: any; error?: string }) => {
-        if (response.error) {
-          reject(new Error(`Error consuming: ${response.error}`));
-          return;
-        }
+  if (isConsumingInProgress) {
+    console.log("Consume operation already in progress, queuing...");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return consumeStream(producerIdToConsume);
+  }
 
-        if (!response.params) {
-          reject(new Error("No params received for consumer"));
-          return;
-        }
-
-        console.log("Consumer params from server:", response.params);
-        resolve(response.params);
-      },
-    );
-  });
+  isConsumingInProgress = true;
 
   try {
+    console.log(`Requesting to consume producer: ${producerIdToConsume}`);
+    const consumerParams = await new Promise<ConsumeResponse["params"]>(
+      (resolve, reject) => {
+        socket.emit(
+          "consume",
+          {
+            consumerTransportId: consumerTransport!.id,
+            producerId: producerIdToConsume,
+            rtpCapabilities: device.rtpCapabilities,
+          },
+          (response: ConsumeResponse) => {
+            if (response.error) {
+              reject(new Error(`Error consuming: ${response.error}`));
+              return;
+            }
+
+            if (!response.params) {
+              reject(new Error("No params received for consumer"));
+              return;
+            }
+
+            console.log("Consumer params from server:", response.params);
+            resolve(response.params);
+          },
+        );
+      },
+    );
+
+    if (!consumerParams) {
+      console.error("No consumer params received");
+      return;
+    }
+
     const consumer = await consumerTransport.consume({
       id: consumerParams.id,
       producerId: consumerParams.producerId,
@@ -526,56 +558,26 @@ async function consumeStream(producerIdToConsume: string) {
 
     consumer.on("transportclose", () => {
       console.warn(`Producer for consumer ${consumer.id} closed.`);
-      consumer.close();
+      handleConsumerClosed(consumer);
       consumers.delete(consumer.producerId);
-
-      if (
-        consumer.kind === "video" &&
-        remoteVideo.srcObject &&
-        (remoteVideo.srcObject as MediaStream)
-          .getTracks()
-          .some((t) => t.id === consumer.track.id)
-      ) {
-        remoteVideo.srcObject = null;
-        console.log("Remote video cleared on producerclose for consumer.");
-      }
-
-      if (
-        consumer.kind === "audio" &&
-        remoteAudio.srcObject &&
-        (remoteAudio.srcObject as MediaStream)
-          .getTracks()
-          .some((t) => t.id === consumer.track.id)
-      ) {
-        remoteAudio.srcObject = null;
-        console.log("Remote audio cleared on producerclose for consumer.");
-      }
     });
 
-    // Handle video streams
     if (consumer.kind === "video") {
-      if (!remoteVideo.srcObject) {
-        const stream = new MediaStream();
-        stream.addTrack(consumer.track);
-        remoteVideo.srcObject = stream;
-        console.log("Remote video stream set up.");
-      } else {
-        (remoteVideo.srcObject as MediaStream).addTrack(consumer.track);
-        console.log("Added video track to existing remote stream.");
+      if (!remoteVideoStream) {
+        remoteVideoStream = new MediaStream();
+        remoteVideo.srcObject = remoteVideoStream;
+        console.log("Created new remote video stream");
       }
-    }
-
-    // Handle audio streams
-    if (consumer.kind === "audio") {
-      if (!remoteAudio.srcObject) {
-        const audioStream = new MediaStream();
-        audioStream.addTrack(consumer.track);
-        remoteAudio.srcObject = audioStream;
-        console.log("Remote audio stream set up.");
-      } else {
-        (remoteAudio.srcObject as MediaStream).addTrack(consumer.track);
-        console.log("Added audio track to existing remote stream.");
+      remoteVideoStream.addTrack(consumer.track);
+      console.log("Added video track to remote stream");
+    } else if (consumer.kind === "audio") {
+      if (!remoteAudioStream) {
+        remoteAudioStream = new MediaStream();
+        remoteAudio.srcObject = remoteAudioStream;
+        console.log("Created new remote audio stream");
       }
+      remoteAudioStream.addTrack(consumer.track);
+      console.log("Added audio track to remote stream");
     }
 
     socket.emit("consumer-resume", { consumerId: consumer.id });
@@ -586,6 +588,8 @@ async function consumeStream(producerIdToConsume: string) {
       error,
     );
     alert(`Failed to consume stream: ${(error as Error).message}`);
+  } finally {
+    isConsumingInProgress = false;
   }
 }
 
@@ -596,7 +600,7 @@ async function startStreaming() {
     if (!socket || !socket.connected) {
       console.log("Socket not connected. Initializing...");
       await initSocket();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       if (!socket.connected) {
         throw new Error("Failed to connect to signaling server after init.");
       }
@@ -619,13 +623,17 @@ async function startStreaming() {
       await createRecvTransport();
     }
 
+    const producePromises = [];
+
     if (!videoProducer || videoProducer.closed) {
-      await startProducingVideo();
+      producePromises.push(startProducingVideo());
     }
 
     if (!audioProducer || audioProducer.closed) {
-      await startProducingAudio();
+      producePromises.push(startProducingAudio());
     }
+
+    await Promise.all(producePromises);
 
     if (
       (videoProducer && !videoProducer.closed) ||
@@ -685,6 +693,8 @@ function stopStreaming() {
 
   remoteVideo.srcObject = null;
   remoteAudio.srcObject = null;
+  remoteVideoStream = null;
+  remoteAudioStream = null;
 
   btnStartStreaming.textContent = "Start Streaming";
   btnStartStreaming.disabled = false;
