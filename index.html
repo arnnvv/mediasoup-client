@@ -1,32 +1,89 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mediasoup 2-Person Call</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaSoup Video Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .video-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .video-wrapper {
+            flex: 1;
+            min-width: 300px;
+        }
+        video {
+            width: 100%;
+            height: 240px;
+            background-color: #000;
+            border-radius: 8px;
+        }
+        audio {
+            width: 100%;
+            margin-top: 10px;
+        }
+        .controls {
+            text-align: center;
+            margin-top: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 10px;
+        }
+        #btnStartStreaming {
+            background-color: #007bff;
+            color: white;
+        }
+        #btnStartStreaming:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        h3 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #333;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>MediaSoup Audio/Video Chat</h1>
-
+        <h1 style="text-align: center;">MediaSoup Audio/Video Chat</h1>
+        
         <div class="video-container">
             <div class="video-wrapper">
-                <h3>Local Video</h3>
+                <h3>Local Stream</h3>
                 <video id="localVideo" autoplay muted playsinline></video>
             </div>
-
+            
             <div class="video-wrapper">
-                <h3>Remote Video</h3>
+                <h3>Remote Stream</h3>
                 <video id="remoteVideo" autoplay playsinline></video>
                 <audio id="remoteAudio" autoplay playsinline controls></audio>
             </div>
         </div>
-
+        
         <div class="controls">
             <button id="btnStartStreaming">Start Streaming</button>
         </div>
     </div>
-
+    
     <script type="module" src="/main.ts"></script>
 </body>
 </html>
