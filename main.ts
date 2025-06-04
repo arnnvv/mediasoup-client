@@ -10,6 +10,7 @@ import {
   type TransportOptions,
   type IceCandidate,
   type IceParameters,
+  type AppData,
 } from "mediasoup-client/types";
 
 interface RtpCapabilitiesResponse {
@@ -62,11 +63,11 @@ let clientRtpCapabilities: ClientRtpCapabilities;
 let producerTransport: Transport | null = null;
 let videoProducer: Producer | null = null;
 let audioProducer: Producer | null = null;
-
-let consumerTransport: Transport | null = null;
+let consumerTransport: Transport<AppData>;
 const webRtcConsumers = new Map<string, Consumer>();
-
 let localStream: MediaStream | null = null;
+let isReadyToConsume = false;
+let pendingConsumes: string[] = [];
 
 const localVideo = document.getElementById("localVideo") as HTMLVideoElement;
 const remoteVideo = document.getElementById("remoteVideo") as HTMLVideoElement;
@@ -88,6 +89,29 @@ const videoParams = {
 
 let remoteVideoStream: MediaStream | null = null;
 let remoteAudioStream: MediaStream | null = null;
+
+async function waitForTransportConnection(transport: Transport): Promise<void> {
+  return new Promise((resolve) => {
+    if (transport.connectionState === "connected") {
+      resolve();
+      return;
+    }
+
+    const onStateChange = (state: string) => {
+      if (state === "connected") {
+        transport.off("connectionstatechange", onStateChange);
+        resolve();
+      }
+    };
+
+    transport.on("connectionstatechange", onStateChange);
+
+    setTimeout(() => {
+      transport.off("connectionstatechange", onStateChange);
+      resolve();
+    }, 5000);
+  });
+}
 
 async function initSocket() {
   socket = io("wss://localhost:3000/mediasoup", {
@@ -124,10 +148,17 @@ async function initSocket() {
       return;
     }
     if (!webRtcConsumers.has(data.producerId)) {
-      console.log(
-        `CLIENT (${socket.id}): Attempting to WebRTC consume new ${data.kind} producer: ${data.producerId} from ${data.producerSocketId}`,
-      );
-      await consumeWebRtcStream(data.producerId);
+      if (isReadyToConsume) {
+        console.log(
+          `CLIENT (${socket.id}): Ready to consume new ${data.kind} producer: ${data.producerId}`,
+        );
+        await consumeWebRtcStream(data.producerId);
+      } else {
+        console.log(
+          `CLIENT (${socket.id}): Queueing new producer ${data.producerId} until ready`,
+        );
+        pendingConsumes.push(data.producerId);
+      }
     } else {
       console.log(
         `CLIENT (${socket.id}): Already WebRTC consuming producer ${data.producerId}`,
@@ -163,10 +194,17 @@ async function initSocket() {
         continue;
       }
       if (!webRtcConsumers.has(producerInfo.producerId)) {
-        console.log(
-          `CLIENT (${socket.id}): Will attempt to consume existing P:${producerInfo.producerId} from ${producerInfo.producerSocketId}`,
-        );
-        await consumeWebRtcStream(producerInfo.producerId);
+        if (isReadyToConsume) {
+          console.log(
+            `CLIENT (${socket.id}): Ready to consume existing P:${producerInfo.producerId}`,
+          );
+          await consumeWebRtcStream(producerInfo.producerId);
+        } else {
+          console.log(
+            `CLIENT (${socket.id}): Queueing existing P:${producerInfo.producerId} until ready`,
+          );
+          pendingConsumes.push(producerInfo.producerId);
+        }
       } else {
         console.log(
           `CLIENT (${socket.id}): Already consuming or attempted P:${producerInfo.producerId}`,
@@ -223,6 +261,10 @@ function handleWebRtcConsumerClosed(consumer: Consumer) {
 
 function cleanupLocalResources() {
   console.log(`CLIENT (${socket.id}): Cleaning up local Mediasoup resources.`);
+
+  isReadyToConsume = false;
+  pendingConsumes = [];
+
   if (videoProducer && !videoProducer.closed) videoProducer.close();
   if (audioProducer && !audioProducer.closed) audioProducer.close();
   if (producerTransport && !producerTransport.closed) producerTransport.close();
@@ -236,7 +278,6 @@ function cleanupLocalResources() {
   audioProducer = null;
   producerTransport = null;
   webRtcConsumers.clear();
-  consumerTransport = null;
 
   if (localStream) {
     localStream.getTracks().forEach((track) => track.stop());
@@ -587,9 +628,9 @@ async function consumeWebRtcStream(producerIdToConsume: string) {
       );
       webRtcConsumers.delete(consumer.producerId);
     });
-    consumer.on("transportclose", () => {
+    consumer.on("@close", () => {
       console.warn(
-        `CLIENT (${socket.id}): [WebRTC Consume] Producer for consumer ${consumer.id} closed.`,
+        `CLIENT (${socket.id}): [WebRTC Consume] @close ${consumer.id} closed.`,
       );
       handleWebRtcConsumerClosed(consumer);
       webRtcConsumers.delete(consumer.producerId);
@@ -670,10 +711,21 @@ async function startStreamingFlow() {
     }
 
     if (!device || !device.loaded) await loadDevice();
+
     if (!producerTransport || producerTransport.closed)
       await createSendTransport();
-    if (!consumerTransport || consumerTransport.closed)
+
+    if (!consumerTransport || consumerTransport.closed) {
       await createRecvTransport();
+      await waitForTransportConnection(consumerTransport);
+    }
+
+    isReadyToConsume = true;
+
+    for (const producerId of pendingConsumes) {
+      await consumeWebRtcStream(producerId);
+    }
+    pendingConsumes = [];
 
     const producePromises = [];
     if (!videoProducer || videoProducer.closed)
