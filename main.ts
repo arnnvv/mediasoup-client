@@ -233,8 +233,7 @@ function handleWebRtcConsumerClosed(consumer: Consumer) {
   );
   if (consumer.kind === "video") {
     if (
-      remoteVideoStream &&
-      remoteVideoStream.getTracks().some((t) => t.id === consumer.track.id)
+      remoteVideoStream?.getTracks().some((t) => t.id === consumer.track.id)
     ) {
       remoteVideoStream.removeTrack(consumer.track);
       if (remoteVideoStream.getTracks().length === 0) {
@@ -245,8 +244,7 @@ function handleWebRtcConsumerClosed(consumer: Consumer) {
     }
   } else if (consumer.kind === "audio") {
     if (
-      remoteAudioStream &&
-      remoteAudioStream.getTracks().some((t) => t.id === consumer.track.id)
+      remoteAudioStream?.getTracks().some((t) => t.id === consumer.track.id)
     ) {
       remoteAudioStream.removeTrack(consumer.track);
       if (remoteAudioStream.getTracks().length === 0) {
@@ -269,9 +267,9 @@ function cleanupLocalResources() {
   if (audioProducer && !audioProducer.closed) audioProducer.close();
   if (producerTransport && !producerTransport.closed) producerTransport.close();
 
-  webRtcConsumers.forEach((c) => {
+  for (const [_, c] of webRtcConsumers) {
     if (!c.closed) c.close();
-  });
+  }
   if (consumerTransport && !consumerTransport.closed) consumerTransport.close();
 
   videoProducer = null;
@@ -280,7 +278,9 @@ function cleanupLocalResources() {
   webRtcConsumers.clear();
 
   if (localStream) {
-    localStream.getTracks().forEach((track) => track.stop());
+    for (const track of localStream.getTracks()) {
+      track.stop();
+    }
     localStream = null;
     localVideo.srcObject = null;
   }
@@ -312,7 +312,7 @@ async function getLocalVideo(): Promise<MediaStream | null> {
 }
 
 async function loadDevice() {
-  if (device && device.loaded) {
+  if (device?.loaded) {
     console.log(`CLIENT (${socket.id}): Device already loaded.`);
     return;
   }
@@ -376,7 +376,7 @@ async function createSendTransport() {
     async ({ dtlsParameters }, callback, errback) => {
       try {
         socket.emit("transport-connect", {
-          transportId: producerTransport!.id,
+          transportId: producerTransport?.id,
           dtlsParameters,
         });
         callback();
@@ -391,7 +391,7 @@ async function createSendTransport() {
       try {
         socket.emit(
           "transport-produce",
-          { transportId: producerTransport!.id, kind, rtpParameters, appData },
+          { transportId: producerTransport?.id, kind, rtpParameters, appData },
           (response: ProduceResponse) => {
             if (response.error || !response.id)
               errback(
@@ -443,7 +443,7 @@ async function createRecvTransport() {
     async ({ dtlsParameters }, callback, errback) => {
       try {
         socket.emit("transport-connect", {
-          transportId: consumerTransport!.id,
+          transportId: consumerTransport?.id,
           dtlsParameters,
         });
         callback();
@@ -578,13 +578,13 @@ async function consumeWebRtcStream(producerIdToConsume: string) {
 
   try {
     console.log(
-      `CLIENT (${socket.id}): [WebRTC Consume] Emitting "consume" to server for P:${producerIdToConsume} on T:${consumerTransport!.id}`,
+      `CLIENT (${socket.id}): [WebRTC Consume] Emitting "consume" to server for P:${producerIdToConsume} on T:${consumerTransport?.id}`,
     );
     const data = await new Promise<ConsumeResponse>((resolve, reject) => {
       socket.emit(
         "consume",
         {
-          consumerTransportId: consumerTransport!.id,
+          consumerTransportId: consumerTransport.id,
           producerId: producerIdToConsume,
           rtpCapabilities: device.rtpCapabilities,
         },
@@ -610,11 +610,15 @@ async function consumeWebRtcStream(producerIdToConsume: string) {
       );
     });
 
-    const consumer = await consumerTransport!.consume({
-      id: data.params!.id,
-      producerId: data.params!.producerId,
-      kind: data.params!.kind,
-      rtpParameters: data.params!.rtpParameters,
+    if (!data.params) {
+      throw new Error("No params in consume response");
+    }
+
+    const consumer = await consumerTransport.consume({
+      id: data.params.id,
+      producerId: data.params.producerId,
+      kind: data.params.kind,
+      rtpParameters: data.params.rtpParameters,
       appData: { source: "webrtc-p2p" },
     });
     webRtcConsumers.set(consumer.producerId, consumer);
@@ -695,7 +699,7 @@ async function startStreamingFlow() {
           setTimeout(() => {
             if (!socket.connected)
               console.warn(
-                `CLIENT: Socket connection timeout in startStreamingFlow.`,
+                "CLIENT: Socket connection timeout in startStreamingFlow.",
               );
             resolve();
           }, 3000);
