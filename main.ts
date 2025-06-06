@@ -318,20 +318,17 @@ async function loadDevice() {
   }
   console.log(`CLIENT (${socket.id}): Loading Mediasoup device...`);
   try {
-    clientRtpCapabilities = await new Promise<ClientRtpCapabilities>(
-      (resolve, reject) => {
-        socket.emit("getRtpCapabilities", (data: RtpCapabilitiesResponse) => {
-          if (!data || !data.rtpCapabilities)
-            reject(new Error("No RTP capabilities from server."));
-          else {
-            console.log(
-              `CLIENT (${socket.id}): Received router RTP capabilities.`,
-            );
-            resolve(data.rtpCapabilities);
-          }
-        });
-      },
-    );
+    const data = (await socket.emitWithAck(
+      "getRtpCapabilities",
+    )) as RtpCapabilitiesResponse;
+
+    if (!data || !data.rtpCapabilities) {
+      throw new Error("No RTP capabilities from server.");
+    }
+
+    console.log(`CLIENT (${socket.id}): Received router RTP capabilities.`);
+    clientRtpCapabilities = data.rtpCapabilities;
+
     device = new Device();
     await device.load({ routerRtpCapabilities: clientRtpCapabilities });
     console.log(
