@@ -7,7 +7,6 @@ import {
   type Consumer,
   type DtlsParameters,
   type RtpParameters,
-  type TransportOptions,
   type IceCandidate,
   type IceParameters,
   type AppData,
@@ -350,24 +349,16 @@ async function createSendTransport() {
   console.log(
     `CLIENT (${socket.id}): Creating send transport (for producing)...`,
   );
-  const transportParams = await new Promise<TransportOptions>(
-    (resolve, reject) => {
-      socket.emit(
-        "createWebRtcTransport",
-        { sender: true },
-        (response: CreateTransportResponse) => {
-          if (response.error || !response.params)
-            reject(
-              new Error(
-                response.error || "No transport params for send transport",
-              ),
-            );
-          else resolve(response.params);
-        },
-      );
-    },
-  );
-  producerTransport = device.createSendTransport(transportParams);
+  const response = (await socket.emitWithAck("createWebRtcTransport", {
+    sender: true,
+  })) as CreateTransportResponse;
+
+  if (response.error || !response.params) {
+    throw new Error(response.error || "No transport params for send transport");
+  }
+
+  producerTransport = device.createSendTransport(response.params);
+
   producerTransport.on(
     "connect",
     async ({ dtlsParameters }, callback, errback) => {
@@ -382,31 +373,32 @@ async function createSendTransport() {
       }
     },
   );
+
   producerTransport.on(
     "produce",
     async ({ kind, rtpParameters, appData }, callback, errback) => {
       try {
-        socket.emit(
-          "transport-produce",
-          { transportId: producerTransport?.id, kind, rtpParameters, appData },
-          (response: ProduceResponse) => {
-            if (response.error || !response.id)
-              errback(
-                new Error(response.error || "No producer id from server"),
-              );
-            else {
-              callback({ id: response.id });
-              console.log(
-                `CLIENT (${socket.id}): Produced ${kind}, server ID: ${response.id}`,
-              );
-            }
-          },
+        const response = (await socket.emitWithAck("transport-produce", {
+          transportId: producerTransport?.id,
+          kind,
+          rtpParameters,
+          appData,
+        })) as ProduceResponse;
+
+        if (response.error || !response.id) {
+          throw new Error(response.error || "No producer id from server");
+        }
+
+        callback({ id: response.id });
+        console.log(
+          `CLIENT (${socket.id}): Produced ${kind}, server ID: ${response.id}`,
         );
       } catch (error) {
         errback(error as Error);
       }
     },
   );
+
   producerTransport.on("connectionstatechange", (state) =>
     console.log(`CLIENT (${socket.id}): Send transport state: ${state}`),
   );
@@ -417,24 +409,15 @@ async function createRecvTransport() {
   console.log(
     `CLIENT (${socket.id}): Creating recv transport (for WebRTC consuming)...`,
   );
-  const transportParams = await new Promise<TransportOptions>(
-    (resolve, reject) => {
-      socket.emit(
-        "createWebRtcTransport",
-        { sender: false },
-        (response: CreateTransportResponse) => {
-          if (response.error || !response.params)
-            reject(
-              new Error(
-                response.error || "No transport params for recv transport",
-              ),
-            );
-          else resolve(response.params);
-        },
-      );
-    },
-  );
-  consumerTransport = device.createRecvTransport(transportParams);
+  const response = (await socket.emitWithAck("createWebRtcTransport", {
+    sender: false,
+  })) as CreateTransportResponse;
+
+  if (response.error || !response.params) {
+    throw new Error(response.error || "No transport params for recv transport");
+  }
+
+  consumerTransport = device.createRecvTransport(response.params);
   consumerTransport.on(
     "connect",
     async ({ dtlsParameters }, callback, errback) => {
@@ -577,39 +560,20 @@ async function consumeWebRtcStream(producerIdToConsume: string) {
     console.log(
       `CLIENT (${socket.id}): [WebRTC Consume] Emitting "consume" to server for P:${producerIdToConsume} on T:${consumerTransport?.id}`,
     );
-    const data = await new Promise<ConsumeResponse>((resolve, reject) => {
-      socket.emit(
-        "consume",
-        {
-          consumerTransportId: consumerTransport.id,
-          producerId: producerIdToConsume,
-          rtpCapabilities: device.rtpCapabilities,
-        },
-        (response: ConsumeResponse) => {
-          if (response.error) {
-            console.error(
-              `CLIENT (${socket.id}): [WebRTC Consume] Server error for P:${producerIdToConsume}: ${response.error}`,
-            );
-            reject(new Error(response.error));
-          } else if (!response.params) {
-            console.error(
-              `CLIENT (${socket.id}): [WebRTC Consume] No params in consume response for P:${producerIdToConsume}`,
-            );
-            reject(new Error("No params in consume response"));
-          } else {
-            console.log(
-              `CLIENT (${socket.id}): [WebRTC Consume] Received consume params for P:${producerIdToConsume}`,
-              response.params,
-            );
-            resolve(response);
-          }
-        },
-      );
-    });
+    const data = (await socket.emitWithAck("consume", {
+      consumerTransportId: consumerTransport.id,
+      producerId: producerIdToConsume,
+      rtpCapabilities: device.rtpCapabilities,
+    })) as ConsumeResponse;
 
-    if (!data.params) {
-      throw new Error("No params in consume response");
+    if (data.error || !data.params) {
+      throw new Error(data.error || "No params in consume response");
     }
+
+    console.log(
+      `CLIENT (${socket.id}): [WebRTC Consume] Received consume params for P:${producerIdToConsume}`,
+      data.params,
+    );
 
     const consumer = await consumerTransport.consume({
       id: data.params.id,
@@ -774,13 +738,15 @@ btnStartStreaming.addEventListener("click", () => {
   }
 });
 
-initSocket()
-  .then(() => {})
-  .catch((err) => {
+(async () => {
+  try {
+    await initSocket();
+  } catch (err) {
     console.error(
       "CLIENT: Initial socket connection failed on page load:",
       err,
     );
     btnStartStreaming.disabled = true;
     alert("Could not connect to signaling server on page load.");
-  });
+  }
+})();
