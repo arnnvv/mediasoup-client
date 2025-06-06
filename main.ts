@@ -657,13 +657,6 @@ async function startStreamingFlow() {
             );
             resolve();
           });
-          setTimeout(() => {
-            if (!socket.connected)
-              console.warn(
-                "CLIENT: Socket connection timeout in startStreamingFlow.",
-              );
-            resolve();
-          }, 3000);
         });
       }
       if (!socket.connected)
