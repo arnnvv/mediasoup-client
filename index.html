@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaSoup Video Chat</title>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+</head>
+<body>
+    <div class="container">
+        <h1>MediaSoup Audio/Video Chat</h1>
+        
+        <div class="video-container">
+            <div class="video-wrapper">
+                <h3>Local Stream</h3>
+                <video id="localVideo" autoplay muted playsinline></video>
+            </div>
+            
+            <div class="video-wrapper">
+                <h3>Remote Stream</h3>
+                <video id="remoteVideo" autoplay playsinline controls></video>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="btnStartStreaming">Start Streaming</button>
+        </div>
+    </div>
+    
+    <script type="module" src="/main.ts"></script>
+</body>
+</html>

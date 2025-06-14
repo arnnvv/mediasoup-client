@@ -1,0 +1,19 @@
+{
+  "name": "media",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "b": "tsc && vite build",
+    "d": "vite preview",
+    "f": "biome format --write .",
+    "l": "biome lint --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "typescript": "5.8.3",
+    "vite": "6.3.5"
+  },
+  "dependencies": {
+    "mediasoup-client": "3.11.0"
+  }
+}
