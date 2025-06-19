@@ -543,7 +543,7 @@ async function consumeWebRtcStream(producerIdToConsume: string) {
   if (!device || !device.loaded) {
     try {
       await loadDevice();
-    } catch (err) {
+    } catch (_e) {
       return;
     }
   }
@@ -554,7 +554,7 @@ async function consumeWebRtcStream(producerIdToConsume: string) {
       if (!consumerTransport || consumerTransport.closed) {
         return;
       }
-    } catch (err) {
+    } catch (_err) {
       return;
     }
   }
